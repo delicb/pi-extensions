@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.js
+*.js.map
+*.d.ts
+!extensions/**/*.ts
+
+# Packaged skills
+*.skill
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor
+.vscode/
+*.swp
+*.swo
+*~
