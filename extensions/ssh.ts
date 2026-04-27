@@ -115,106 +115,45 @@ export default function (pi: ExtensionAPI) {
 	pi.registerFlag("ssh", { description: "SSH remote: user@host or user@host:/path", type: "string" });
 
 	const localCwd = process.cwd();
-	const localRead = createReadTool(localCwd);
-	const localWrite = createWriteTool(localCwd);
-	const localEdit = createEditTool(localCwd);
-	const localBash = createBashTool(localCwd);
 
-	// Resolved lazily on session_start (CLI flags not available during factory)
 	let resolvedSsh: { remote: string; remoteCwd: string } | null = null;
 
-	const getSsh = () => resolvedSsh;
-
-	pi.registerTool({
-		...localRead,
-		async execute(id, params, signal, onUpdate, _ctx) {
-			const ssh = getSsh();
-			if (ssh) {
-				const tool = createReadTool(localCwd, {
-					operations: createRemoteReadOps(ssh.remote, ssh.remoteCwd, localCwd),
-				});
-				return tool.execute(id, params, signal, onUpdate);
-			}
-			return localRead.execute(id, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...localWrite,
-		async execute(id, params, signal, onUpdate, _ctx) {
-			const ssh = getSsh();
-			if (ssh) {
-				const tool = createWriteTool(localCwd, {
-					operations: createRemoteWriteOps(ssh.remote, ssh.remoteCwd, localCwd),
-				});
-				return tool.execute(id, params, signal, onUpdate);
-			}
-			return localWrite.execute(id, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...localEdit,
-		async execute(id, params, signal, onUpdate, _ctx) {
-			const ssh = getSsh();
-			if (ssh) {
-				const tool = createEditTool(localCwd, {
-					operations: createRemoteEditOps(ssh.remote, ssh.remoteCwd, localCwd),
-				});
-				return tool.execute(id, params, signal, onUpdate);
-			}
-			return localEdit.execute(id, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...localBash,
-		async execute(id, params, signal, onUpdate, _ctx) {
-			const ssh = getSsh();
-			if (ssh) {
-				const tool = createBashTool(localCwd, {
-					operations: createRemoteBashOps(ssh.remote, ssh.remoteCwd, localCwd),
-				});
-				return tool.execute(id, params, signal, onUpdate);
-			}
-			return localBash.execute(id, params, signal, onUpdate);
-		},
-	});
-
 	pi.on("session_start", async (_event, ctx) => {
-		// Resolve SSH config now that CLI flags are available
 		const arg = pi.getFlag("ssh") as string | undefined;
-		if (arg) {
-			if (arg.includes(":")) {
-				const [remote, path] = arg.split(":");
-				resolvedSsh = { remote, remoteCwd: path };
-			} else {
-				// No path given, evaluate pwd on remote
-				const remote = arg;
-				const pwd = (await sshExec(remote, "pwd")).toString().trim();
-				resolvedSsh = { remote, remoteCwd: pwd };
-			}
-			ctx.ui.setStatus("ssh", ctx.ui.theme.fg("accent", `SSH: ${resolvedSsh.remote}:${resolvedSsh.remoteCwd}`));
-			ctx.ui.notify(`SSH mode: ${resolvedSsh.remote}:${resolvedSsh.remoteCwd}`, "info");
+		if (!arg) return;
+
+		if (arg.includes(":")) {
+			const [remote, path] = arg.split(":");
+			resolvedSsh = { remote, remoteCwd: path };
+		} else {
+			const remote = arg;
+			const pwd = (await sshExec(remote, "pwd")).toString().trim();
+			resolvedSsh = { remote, remoteCwd: pwd };
 		}
+
+		const { remote, remoteCwd } = resolvedSsh;
+		pi.registerTool(createReadTool(localCwd, { operations: createRemoteReadOps(remote, remoteCwd, localCwd) }));
+		pi.registerTool(createWriteTool(localCwd, { operations: createRemoteWriteOps(remote, remoteCwd, localCwd) }));
+		pi.registerTool(createEditTool(localCwd, { operations: createRemoteEditOps(remote, remoteCwd, localCwd) }));
+		pi.registerTool(createBashTool(localCwd, { operations: createRemoteBashOps(remote, remoteCwd, localCwd) }));
+
+		ctx.ui.setStatus("ssh", ctx.ui.theme.fg("accent", `SSH: ${remote}:${remoteCwd}`));
+		ctx.ui.notify(`SSH mode: ${remote}:${remoteCwd}`, "info");
 	});
 
-	// Handle user ! commands via SSH
+	// Route user ! commands through SSH when active
 	pi.on("user_bash", (_event) => {
-		const ssh = getSsh();
-		if (!ssh) return; // No SSH, use local execution
-		return { operations: createRemoteBashOps(ssh.remote, ssh.remoteCwd, localCwd) };
+		if (!resolvedSsh) return;
+		return { operations: createRemoteBashOps(resolvedSsh.remote, resolvedSsh.remoteCwd, localCwd) };
 	});
 
-	// Replace local cwd with remote cwd in system prompt
+	// Swap local cwd for remote cwd in the system prompt when active
 	pi.on("before_agent_start", async (event) => {
-		const ssh = getSsh();
-		if (ssh) {
-			const modified = event.systemPrompt.replace(
-				`Current working directory: ${localCwd}`,
-				`Current working directory: ${ssh.remoteCwd} (via SSH: ${ssh.remote})`,
-			);
-			return { systemPrompt: modified };
-		}
+		if (!resolvedSsh) return;
+		const modified = event.systemPrompt.replace(
+			`Current working directory: ${localCwd}`,
+			`Current working directory: ${resolvedSsh.remoteCwd} (via SSH: ${resolvedSsh.remote})`,
+		);
+		return { systemPrompt: modified };
 	});
 }
