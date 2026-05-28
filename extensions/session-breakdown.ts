@@ -18,17 +18,16 @@
  * - Brightness: selected metric per day (log-scaled)
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { BorderedLoader } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { BorderedLoader } from "@earendil-works/pi-coding-agent";
 import {
 	Key,
 	matchesKey,
-	sliceByColumn,
 	type Component,
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -50,6 +49,69 @@ const TOD_BUCKETS: { key: TodKey; label: string; from: number; to: number }[] = 
 	{ key: "evening", label: "Evening (17–21)", from: 17, to: 21 },
 	{ key: "night", label: "Night (22–23)", from: 22, to: 23 },
 ];
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+function extractAnsiCode(str: string, pos: number): { code: string; length: number } | null {
+	if (str[pos] !== "\x1b") return null;
+	const next = str[pos + 1];
+	if (next === "[") {
+		let end = pos + 2;
+		while (end < str.length && !/[mGKHJ]/.test(str[end]!)) end++;
+		return end < str.length ? { code: str.slice(pos, end + 1), length: end + 1 - pos } : null;
+	}
+	if (next === "]" || next === "_") {
+		let end = pos + 2;
+		while (end < str.length) {
+			if (str[end] === "\x07") return { code: str.slice(pos, end + 1), length: end + 1 - pos };
+			if (str[end] === "\x1b" && str[end + 1] === "\\") {
+				return { code: str.slice(pos, end + 2), length: end + 2 - pos };
+			}
+			end++;
+		}
+	}
+	return null;
+}
+
+function sliceByColumn(line: string, startCol: number, length: number, strict = false): string {
+	if (length <= 0) return "";
+	const endCol = startCol + length;
+	let result = "";
+	let currentCol = 0;
+	let pendingAnsi = "";
+	let i = 0;
+
+	while (i < line.length) {
+		const ansi = extractAnsiCode(line, i);
+		if (ansi) {
+			if (currentCol >= startCol && currentCol < endCol) result += ansi.code;
+			else if (currentCol < startCol) pendingAnsi += ansi.code;
+			i += ansi.length;
+			continue;
+		}
+
+		let textEnd = i;
+		while (textEnd < line.length && !extractAnsiCode(line, textEnd)) textEnd++;
+		for (const { segment } of graphemeSegmenter.segment(line.slice(i, textEnd))) {
+			const width = visibleWidth(segment);
+			const inRange = currentCol >= startCol && currentCol < endCol;
+			const fits = !strict || currentCol + width <= endCol;
+			if (inRange && fits) {
+				if (pendingAnsi) {
+					result += pendingAnsi;
+					pendingAnsi = "";
+				}
+				result += segment;
+			}
+			currentCol += width;
+			if (currentCol >= endCol) break;
+		}
+		i = textEnd;
+		if (currentCol >= endCol) break;
+	}
+
+	return result;
+}
 
 function todBucketForHour(hour: number): TodKey {
 	for (const b of TOD_BUCKETS) {
