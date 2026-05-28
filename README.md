@@ -31,7 +31,9 @@ pi install git:github.com/<you>/<repo>
 - `extensions/prevent-cmd-c-scroll.ts` - Prevents macOS Cmd+C copy from jumping Pi back to the input.
 - `extensions/session-breakdown.ts` - Session statistics and breakdown UI.
 - `extensions/ssh.ts` - SSH remote tool execution extension.
-- `skills/` - Local Pi skills.
+- `skills/background-processes` - Pi-specific background process workflow skill.
+
+Shared personal skills live in `~/.agents/skills` and are managed from the dotfiles repo.
 - `themes/catppuccin-mocha-contrast.json` - Catppuccin Mocha theme with extra contrast.
 
 Theme is a fork of https://github.com/ujj/pi-catppuccin, with more contrast to distinguish user messages from responses.
